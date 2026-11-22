@@ -224,13 +224,18 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         // 8. 调用Gost服务更新转发
+        // 隧道变化时 limiter 来自权限检查结果；隧道未变化时不会做权限检查，
+        // 必须从转发所属用户的 UserTunnel 取限速规则，否则 UpdateService 会把 limiter 字段覆盖掉
+        Integer limiter = tunnelChanged
+                ? (permissionResult != null ? permissionResult.getLimiter() : null)
+                : (userTunnel != null ? userTunnel.getSpeedId() : null);
         R gostResult;
         if (tunnelChanged) {
             // 隧道变化时：先删除原配置，再创建新配置
-            gostResult = updateGostServicesWithTunnelChange(existForward, updatedForward, tunnel, permissionResult != null ? permissionResult.getLimiter() : null, nodeInfo, userTunnel);
+            gostResult = updateGostServicesWithTunnelChange(existForward, updatedForward, tunnel, limiter, nodeInfo, userTunnel);
         } else {
             // 隧道未变化时：直接更新配置
-            gostResult = updateGostServices(updatedForward, tunnel, permissionResult != null ? permissionResult.getLimiter() : null, nodeInfo, userTunnel);
+            gostResult = updateGostServices(updatedForward, tunnel, limiter, nodeInfo, userTunnel);
         }
 
         if (gostResult.getCode() != 0) {
