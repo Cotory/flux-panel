@@ -134,14 +134,14 @@ export default function UserPage() {
   const [tunnelListLoading, setTunnelListLoading] = useState(false);  
   
   // 分配新隧道权限相关状态
-  const [tunnelForm, setTunnelForm] = useState<UserTunnelForm>({
-    tunnelId: null,
+  const emptyTunnelForm = (): UserTunnelForm => ({
+    tunnelIds: [],
     flow: 100,
     num: 10,
     expTime: null,
-    flowResetTime: 0,
-    speedId: null
+    flowResetTime: 0
   });
+  const [tunnelForm, setTunnelForm] = useState<UserTunnelForm>(emptyTunnelForm);
   const [assignLoading, setAssignLoading] = useState(false);
 
   // 编辑隧道权限相关状态
@@ -334,52 +334,59 @@ export default function UserPage() {
   // 隧道权限管理操作
   const handleManageTunnels = (user: User) => {
     setCurrentUser(user);
-    setTunnelForm({
-      tunnelId: null,
-      flow: 100,
-      num: 10,
-      expTime: null,
-      flowResetTime: 0,
-      speedId: null
-    });
+    setTunnelForm(emptyTunnelForm());
     onTunnelModalOpen();
     loadUserTunnels(user.id);
   };
 
   const handleAssignTunnel = async () => {
-    if (!tunnelForm.tunnelId || !tunnelForm.expTime || !currentUser) {
+    if (tunnelForm.tunnelIds.length === 0 || !tunnelForm.expTime || !currentUser) {
       toast.error('请填写完整信息');
       return;
     }
 
+    const expTime = tunnelForm.expTime.getTime();
+    const tunnelIds = tunnelForm.tunnelIds;
+
     setAssignLoading(true);
     try {
-      const response = await assignUserTunnel({
-        userId: currentUser.id,
-        tunnelId: tunnelForm.tunnelId,
-        flow: tunnelForm.flow,
-        num: tunnelForm.num,
-        expTime: tunnelForm.expTime.getTime(),
-        flowResetTime: tunnelForm.flowResetTime,
-        speedId: tunnelForm.speedId
-      });
-
-      if (response.code === 0) {
-        toast.success('分配成功');
-        setTunnelForm({
-          tunnelId: null,
-          flow: 100,
-          num: 10,
-          expTime: null,
-          flowResetTime: 0,
+      // 逐条调用分配接口（后端每次分配一条），失败的单独收集
+      const results = await Promise.allSettled(
+        tunnelIds.map(tunnelId => assignUserTunnel({
+          userId: currentUser.id,
+          tunnelId,
+          flow: tunnelForm.flow,
+          num: tunnelForm.num,
+          expTime,
+          flowResetTime: tunnelForm.flowResetTime,
           speedId: null
-        });
-        loadUserTunnels(currentUser.id);
+        }))
+      );
+
+      const failed: { tunnelId: number; msg: string }[] = [];
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          failed.push({ tunnelId: tunnelIds[i], msg: '分配失败' });
+        } else if (result.value.code !== 0) {
+          failed.push({ tunnelId: tunnelIds[i], msg: result.value.msg || '分配失败' });
+        }
+      });
+      const successCount = tunnelIds.length - failed.length;
+
+      if (failed.length === 0) {
+        toast.success(tunnelIds.length > 1 ? `已分配 ${successCount} 条隧道权限` : '分配成功');
+        setTunnelForm(emptyTunnelForm());
       } else {
-        toast.error(response.msg || '分配失败');
+        const tunnelName = (id: number) => tunnels.find(t => t.id === id)?.name ?? `#${id}`;
+        const detail = failed.map(f => `${tunnelName(f.tunnelId)}：${f.msg}`).join('；');
+        toast.error(successCount > 0 ? `成功 ${successCount} 条，失败 ${failed.length} 条（${detail}）` : detail);
+        // 只保留失败的隧道，便于调整后重试
+        setTunnelForm(prev => ({ ...prev, tunnelIds: failed.map(f => f.tunnelId) }));
       }
-    } catch (error) {
-      toast.error('分配失败');
+
+      if (successCount > 0) {
+        loadUserTunnels(currentUser.id);
+      }
     } finally {
       setAssignLoading(false);
     }
@@ -518,9 +525,6 @@ export default function UserPage() {
     tunnel => !userTunnels.some(ut => ut.tunnelId === tunnel.id)
   );
 
-  const availableSpeedLimits = speedLimits.filter(
-    speedLimit => speedLimit.tunnelId === tunnelForm.tunnelId
-  );
 
   const editAvailableSpeedLimits = speedLimits.filter(
     speedLimit => speedLimit.tunnelId === editTunnelForm?.tunnelId
@@ -881,10 +885,15 @@ export default function UserPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Select
                       label="选择隧道"
-                      selectedKeys={tunnelForm.tunnelId ? [tunnelForm.tunnelId.toString()] : []}
+                      placeholder="可多选"
+                      selectionMode="multiple"
+                      className="md:col-span-2"
+                      selectedKeys={new Set(tunnelForm.tunnelIds.map(String))}
                       onSelectionChange={(keys) => {
-                        const value = Array.from(keys)[0] as string;
-                        setTunnelForm(prev => ({ ...prev, tunnelId: Number(value) || null, speedId: null }));
+                        const ids = keys === "all"
+                          ? availableTunnels.map(t => t.id)
+                          : Array.from(keys).map(Number);
+                        setTunnelForm(prev => ({ ...prev, tunnelIds: ids }));
                       }}
                     >
                       {availableTunnels.map(tunnel => (
@@ -893,26 +902,7 @@ export default function UserPage() {
                         </SelectItem>
                       ))}
                     </Select>
-                    
-                    <Select
-                      label="限速规则"
-                      selectedKeys={tunnelForm.speedId ? [tunnelForm.speedId.toString()] : ["null"]}
-                      onSelectionChange={(keys) => {
-                        const value = Array.from(keys)[0] as string;
-                        setTunnelForm(prev => ({ ...prev, speedId: value === "null" ? null : Number(value) }));
-                      }}
-                      isDisabled={!tunnelForm.tunnelId}
-                    >
-                      {[
-                        <SelectItem key="null" textValue="不限速">不限速</SelectItem>,
-                        ...availableSpeedLimits.map(speedLimit => (
-                          <SelectItem key={speedLimit.id.toString()} textValue={speedLimit.name}>
-                            {speedLimit.name}
-                          </SelectItem>
-                        ))
-                      ]}
-                    </Select>
-                    
+
                     <Input
                       label="流量限制(GB)"
                       type="number"

@@ -50,12 +50,12 @@ export interface UserTunnel {
 }
 
 export interface UserTunnelForm {
-  tunnelId: number | null;
+  // 支持一次分配多条隧道，其余配置共用；限速规则分配后在权限列表中单独编辑
+  tunnelIds: number[];
   flow: number;
   num: number;
   expTime: Date | null;
   flowResetTime: number;
-  speedId: number | null;
 }
 
 export interface Tunnel {
