@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from "@heroui/button";
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Input } from "@heroui/input";
@@ -130,6 +130,8 @@ export default function UserPage() {
   // 隧道权限管理相关状态
   const { isOpen: isTunnelModalOpen, onOpen: onTunnelModalOpen, onClose: onTunnelModalClose } = useDisclosure();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // 当前打开的隧道权限弹窗对应的用户，用于丢弃切换用户后才返回的旧请求结果
+  const tunnelModalUserIdRef = useRef<number | null>(null);
   const [userTunnels, setUserTunnels] = useState<UserTunnel[]>([]);
   const [tunnelListLoading, setTunnelListLoading] = useState(false);  
   
@@ -334,44 +336,46 @@ export default function UserPage() {
   // 隧道权限管理操作
   const handleManageTunnels = (user: User) => {
     setCurrentUser(user);
+    tunnelModalUserIdRef.current = user.id;
     setTunnelForm(emptyTunnelForm());
     onTunnelModalOpen();
     loadUserTunnels(user.id);
   };
 
   const handleAssignTunnel = async () => {
-    if (tunnelForm.tunnelIds.length === 0 || !tunnelForm.expTime || !currentUser) {
+    // 只提交仍可分配的隧道（已拥有权限的隧道不在下拉中，可能是选中后权限列表才加载出来）
+    const tunnelIds = tunnelForm.tunnelIds.filter(id => availableTunnels.some(t => t.id === id));
+    if (tunnelIds.length === 0 || !tunnelForm.expTime || !currentUser) {
+      setTunnelForm(prev => ({ ...prev, tunnelIds }));
       toast.error('请填写完整信息');
       return;
     }
 
+    const userId = currentUser.id;
     const expTime = tunnelForm.expTime.getTime();
-    const tunnelIds = tunnelForm.tunnelIds;
+    const { flow, num, flowResetTime } = tunnelForm;
 
     setAssignLoading(true);
     try {
-      // 逐条调用分配接口（后端每次分配一条），失败的单独收集
-      const results = await Promise.allSettled(
-        tunnelIds.map(tunnelId => assignUserTunnel({
-          userId: currentUser.id,
-          tunnelId,
-          flow: tunnelForm.flow,
-          num: tunnelForm.num,
-          expTime,
-          flowResetTime: tunnelForm.flowResetTime,
-          speedId: null
-        }))
-      );
-
+      // 后端每次分配一条；逐条串行提交，避免一次并发过多请求，失败的单独收集
       const failed: { tunnelId: number; msg: string }[] = [];
-      results.forEach((result, i) => {
-        if (result.status === 'rejected') {
-          failed.push({ tunnelId: tunnelIds[i], msg: '分配失败' });
-        } else if (result.value.code !== 0) {
-          failed.push({ tunnelId: tunnelIds[i], msg: result.value.msg || '分配失败' });
+      for (const tunnelId of tunnelIds) {
+        try {
+          const response = await assignUserTunnel({ userId, tunnelId, flow, num, expTime, flowResetTime, speedId: null });
+          if (response.code !== 0) {
+            failed.push({ tunnelId, msg: response.msg || '分配失败' });
+          }
+        } catch (error) {
+          failed.push({ tunnelId, msg: '分配失败' });
         }
-      });
+      }
       const successCount = tunnelIds.length - failed.length;
+
+      // 请求期间已切换到其他用户的弹窗：不改动新弹窗的表单和列表
+      if (tunnelModalUserIdRef.current !== userId) {
+        if (failed.length > 0) toast.error(`部分隧道权限分配失败（${failed.length} 条）`);
+        return;
+      }
 
       if (failed.length === 0) {
         toast.success(tunnelIds.length > 1 ? `已分配 ${successCount} 条隧道权限` : '分配成功');
@@ -385,7 +389,7 @@ export default function UserPage() {
       }
 
       if (successCount > 0) {
-        loadUserTunnels(currentUser.id);
+        loadUserTunnels(userId);
       }
     } finally {
       setAssignLoading(false);
