@@ -52,6 +52,6 @@ Node (`go-gost/`):
 
 ## Release / CI
 
-`.github/workflows/docker-build.yml` runs on pushes to `main`/`beta`. The version is the `VERSION` env at the top of that file. Images (`vite-frontend`, `springboot-backend`) are built only if a git tag for that version doesn't exist yet. The gost binary is rebuilt whenever `go-gost/` changed since the tag. Bump `VERSION` to publish. Image names, the compose files, README install URLs, and the install scripts still point to upstream `bqlpfy/*` and must be repointed for this fork to deploy its own builds.
+`.github/workflows/docker-build.yml` runs on pushes to `main`/`beta`. The version is the `VERSION` env at the top of that file. Images (`vite-frontend`, `springboot-backend`) are built only if a git tag for that version doesn't exist yet. The gost binary is rebuilt whenever `go-gost/` changed since the tag. Bump `VERSION` to publish. The create-release job tags the commit and uploads gost binaries, install scripts, compose files and `gost.sql` to the GitHub release. Images are pushed to GHCR (`IMAGE_PREFIX: ghcr.io/cotory`, using `GITHUB_TOKEN`). Install scripts and the panel's node-install command (`NodeServiceImpl`) download from this fork's releases. When bumping `VERSION`, also update the hardcoded `1.4.3` in the compose files, `install.sh`, `panel_install.sh` and `NodeServiceImpl`, and `vite-frontend/src/config/site.ts`.
 
 Default admin account after install: `admin_user` / `admin_user`.
