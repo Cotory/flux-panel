@@ -178,7 +178,7 @@ export default function UserPage() {
     loadUsers();
     loadTunnels();
     loadSpeedLimits();
-  }, [pagination.current, pagination.size, searchKeyword]);
+  }, [pagination.current, pagination.size]);
 
   // 数据加载函数
   const loadUsers = async () => {
@@ -525,6 +525,14 @@ export default function UserPage() {
   };
 
   // 过滤数据
+  // 后端返回全部用户，搜索在前端按账号/名称实时过滤（不区分大小写）
+  const keyword = searchKeyword.trim().toLowerCase();
+  const filteredUsers = keyword
+    ? users.filter(u =>
+        (u.user || '').toLowerCase().includes(keyword) ||
+        (u.name || '').toLowerCase().includes(keyword))
+    : users;
+
   const availableTunnels = tunnels.filter(
     tunnel => !userTunnels.some(ut => ut.tunnelId === tunnel.id)
   );
@@ -587,7 +595,7 @@ export default function UserPage() {
             <span className="text-default-600">正在加载...</span>
           </div>
         </div>
-      ) : users.length === 0 ? (
+      ) : filteredUsers.length === 0 ? (
         <Card className="shadow-sm border border-gray-200 dark:border-gray-700">
           <CardBody className="text-center py-16">
             <div className="flex flex-col items-center gap-4">
@@ -595,15 +603,15 @@ export default function UserPage() {
                 <UserIcon className="w-8 h-8 text-default-400" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-foreground">暂无用户数据</h3>
-                <p className="text-default-500 text-sm mt-1">还没有创建任何用户，点击上方按钮开始创建</p>
+                <h3 className="text-lg font-semibold text-foreground">{keyword ? '没有匹配的用户' : '暂无用户数据'}</h3>
+                <p className="text-default-500 text-sm mt-1">{keyword ? `没有找到包含“${searchKeyword.trim()}”的用户` : '还没有创建任何用户，点击上方按钮开始创建'}</p>
               </div>
             </div>
           </CardBody>
         </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-          {users.map((user) => {
+          {filteredUsers.map((user) => {
             const userStatus = getUserStatus(user);
             const expStatus = user.expTime ? getExpireStatus(user.expTime) : null;
             const usedFlow = calculateUserTotalUsedFlow(user);
